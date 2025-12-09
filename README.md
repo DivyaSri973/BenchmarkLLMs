@@ -223,7 +223,7 @@ The script will:
 }
 ```
 
-### Metrics Explained
+### Metrics
 
 - **accuracy**: Percentage of correct predictions
 - **average_latency_ms**: Mean response time in milliseconds
@@ -248,14 +248,12 @@ Detailed execution logs saved to `benchmark.log`:
 
 ### Design Principles
 
-This system follows **SOLID principles** and software engineering best practices:
+Followed **SOLID principles** and software engineering best practices:
 
 #### 1. Single Responsibility Principle (SRP)
 Each class has one clear purpose:
 - **`SentimentParser`**: Parses model responses into sentiment labels
-- **`MetricsCollector`**: Collects and calculates performance metrics
-- **`ConfusionMatrix`**: Tracks prediction accuracy per class
-- **`BenchmarkRunner`**: Orchestrates benchmark execution
+- **`BenchmarkRunner`**: Orchestrates benchmark execution for a given model and generate metrics
 - **`BenchmarkApp`**: Coordinates overall application flow
 
 #### 2. Open/Closed Principle (OCP)
@@ -278,17 +276,18 @@ Each class has one clear purpose:
                     BenchmarkRunner                           
   - Iterates through dataset                                  
   - Handles batch processing                                  
-  - Manages retries                                           
-           │ uses                     │ uses
-           ▼                          ▼
-  MetricsCollector             BaseModel (Abstract)         
-  - Tracks metrics         - Retry logic                    
-  - Calculates stats       - Error handling                 
-  - Confusion matrix       - Rate limiting                  
-                                  │ implements
-                                  ▼
-                     OpenAIModel  GroqModel  GeminiModel    
-                     - Provider-specific implementations     
+  - Manages retries   
+  - generate metrics                                        
+           │ uses                 
+           ▼                          
+  BaseModel (Abstract)                     
+  - Retry logic                             
+  - Error handling                        
+  - Rate limiting                         
+            │ implements
+            ▼
+    OpenAIModel  GroqModel  GeminiModel    
+    - Provider-specific implementations     
 ```
 
 ### Key Design Decisions
@@ -297,6 +296,7 @@ Each class has one clear purpose:
 - OpenAI no longer offers a free tier; Gemini free tier is not available
 - GPT-4o Mini is faster than other free-tier LLMs and accuracy is close to full GPT-4
 - Groq LLaMA 3.1 8B Instant is very fast and available on free tier
+- For inference defined Few-shot prompting and with temperature = 0 to make the model more deterministic, which is ideal for sentiment classification and reduces noisy or random outputs
 
 #### Why Retry Logic ?
 - Handles temporary API failures (timeouts, rate limits)

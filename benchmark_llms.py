@@ -127,109 +127,6 @@ class SentimentParser:
         logger.warning(f"Could not parse sentiment from: {text[:100]}")
         return "Unknown"
 
-class ConfusionMatrix:
-    def __init__(self, labels: List[str] = None):
-        if labels is None:
-            labels = ["Positive", "Negative", "Neutral"]
-        self.labels = labels
-        self.matrix = {t: {p: 0 for p in labels} for t in labels}
-        logger.debug(f"Initialized confusion matrix with labels: {labels}")
-
-    def update(self, true_label: str, pred_label: str):
-        if true_label in self.matrix and pred_label in self.matrix[true_label]:
-            self.matrix[true_label][pred_label] += 1
-            logger.debug(f"Updated confusion matrix: true={true_label}, pred={pred_label}")
-        else:
-            logger.warning(f"Invalid labels for confusion matrix: true={true_label}, pred={pred_label}")
-
-    def to_dict(self) -> Dict[str, Dict[str, int]]:
-        return self.matrix
-
-class MetricsCollector:
-    #Collect and calculate benchmark metrics.
-    
-    def __init__(self, pricing: Dict[str, float]):
-        self.pricing = pricing
-        self.correct = 0
-        self.total = 0
-        self.latencies: List[float] = []
-        self.input_tokens = 0
-        self.output_tokens = 0
-        self.confusion_matrix = ConfusionMatrix()
-        self.errors = 0
-        self.retries = 0  # Track retry attempts
-        logger.debug("MetricsCollector initialized")
-    
-    def record_prediction(
-        self, 
-        predicted: str, 
-        true_sentiment: str, 
-        input_toks: int, 
-        output_toks: int, 
-        latency: float
-    ):
-        #Record a single prediction.
-        self.input_tokens += input_toks
-        self.output_tokens += output_toks
-        self.latencies.append(latency)
-        self.total += 1
-        
-        if predicted == true_sentiment:
-            self.correct += 1
-        
-        if true_sentiment in self.confusion_matrix.matrix:
-            self.confusion_matrix.update(true_sentiment, predicted)
-    
-    def record_error(self):
-        self.errors += 1
-    
-    def record_retry(self):
-        self.retries += 1
-    
-    def calculate_metrics(self, model_name: str) -> Dict[str, Any]:
-        if self.total == 0:
-            logger.warning(f"No predictions recorded for {model_name}")
-            return {
-                "model_name": model_name,
-                "accuracy": 0.0,
-                "average_latency_ms": 0.0,
-                "estimated_total_tokens": 0,
-                "estimated_cost_usd": 0.0,
-                "confusion_matrix": {},
-                "total_predictions": 0,
-                "errors": self.errors,
-                "retries": self.retries
-            }
-        
-        accuracy = (self.correct / self.total * 100)
-        avg_latency = sum(self.latencies) / len(self.latencies) if self.latencies else 0.0
-        total_tokens = self.input_tokens + self.output_tokens
-        cost = (
-            self.input_tokens * self.pricing.get("input", 0.0) + 
-            self.output_tokens * self.pricing.get("output", 0.0)
-        ) / 1_000_000
-        
-        logger.info(
-            f"Metrics for {model_name}: "
-            f"accuracy={accuracy:.2f}%, "
-            f"avg_latency={avg_latency:.2f}ms, "
-            f"cost=${cost:.6f}, "
-            f"errors={self.errors}, "
-            f"retries={self.retries}"
-        )
-        
-        return {
-            "model_name": model_name,
-            "accuracy": round(accuracy, 2),
-            "average_latency_ms": round(avg_latency, 2),
-            "estimated_total_tokens": int(total_tokens),
-            "estimated_cost_usd": round(cost, 6),
-            "confusion_matrix": self.confusion_matrix.to_dict(),
-            "total_predictions": self.total,
-            "errors": self.errors,
-            "retries": self.retries
-        }
-
 # Base model class for LLMs with retry logic
 class BaseModel:
     def __init__(self, client: Any, config: ModelConfig, app_config: AppConfig):
@@ -372,74 +269,172 @@ class BenchmarkRunner:
         logger.info("BenchmarkRunner initialized")
 
     def run_benchmark(self, df: pd.DataFrame, llm: BaseModel) -> Dict[str, Any]:
-        model_identifier = f"{llm.config.provider}:{llm.config.model_name}"
-        logger.info(f"Starting benchmark for {model_identifier}")
+        #runs benchmark for a given model and return metrics
+        model_id = f"{llm.config.provider}:{llm.config.model_name}"
+        logger.info(f"Starting benchmark for {model_id}")
         logger.info(
             f"Batch settings: {self.app_config.batch_size} requests per batch, "
             f"{self.app_config.batch_break}s break between batches"
         )
-        
-        metrics_collector = MetricsCollector(llm.config.pricing)
+
+        metrics = self._init_metrics()
         total_samples = len(df)
         requests_in_batch = 0
 
         for idx, row in df.iterrows():
-            feedback_text = row.get('feedback_text', '')
-            if not feedback_text or pd.isna(feedback_text):
+            if not self._validate_row(row):
                 logger.warning(f"Skipping row {idx + 1}: empty feedback_text")
-                metrics_collector.record_error()
+                metrics["errors"] += 1
                 continue
-            
-            prompt = f"Feedback: {feedback_text}"
-            
-            try:
-                # Using retry logic
-                text, in_toks, out_toks, latency = llm.infer_with_retry(prompt)
-                
-                # Track if any retries occurred
-                if latency > (self.app_config.retry_delay * 1000):
-                    metrics_collector.record_retry()
-                
-                predicted = self.parser.parse(text)
-                true_sentiment = row.get("true_sentiment", "")
-                
-                metrics_collector.record_prediction(
-                    predicted, 
-                    true_sentiment, 
-                    in_toks, 
-                    out_toks, 
-                    latency
-                )
-                
-                is_correct = predicted == true_sentiment
-                match_symbol = "✓" if is_correct else "✗"
-                logger.info(
-                    f"  [{metrics_collector.total}/{total_samples}] {match_symbol} "
-                    f"Predicted: {predicted}, True: {true_sentiment}, "
-                    f"Latency: {latency:.0f}ms"
-                )
-                
-                # Increment batch counter
-                requests_in_batch += 1
-                
-                # Check if batch is complete
-                if requests_in_batch >= self.app_config.batch_size:
-                    logger.info(
-                        f"Completed batch of {self.app_config.batch_size} requests. "
-                        f"Taking {self.app_config.batch_break}s break..."
-                    )
-                    time.sleep(self.app_config.batch_break)
-                    requests_in_batch = 0
-                
-                # Regular sleep between requests to avoid throttling (if not taking batch break)
-                elif idx < total_samples - 1 and self.app_config.sleep_between_requests > 0:
-                    time.sleep(self.app_config.sleep_between_requests)
+            prompt = self._build_prompt(row)
 
+            try:
+                text, in_toks, out_toks, latency = self._run_llm(llm, prompt, metrics)
+                self._update_metrics(metrics, text, row, in_toks, out_toks, latency)
+                self._log_progress(metrics, total_samples, latency)
+                requests_in_batch = self._batch_sleep_logic(
+                    requests_in_batch, idx, total_samples
+                )
             except Exception as e:
-                logger.error(f"Error on sample {idx + 1} after retries: {e}")
-                metrics_collector.record_error()
+                logger.error(f"Error on sample {idx + 1}: {e}")
+                metrics["errors"] += 1
                 continue
-        return metrics_collector.calculate_metrics(model_identifier)
+        return self._finalize_metrics(metrics, llm, model_id)
+    
+    def _init_metrics(self) -> Dict[str, Any]:
+        # Initializing metrics for current benchmark model run
+        labels = ["Positive", "Negative", "Neutral"]
+        return {
+            "correct": 0,
+            "total": 0,
+            "latencies": [],
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "errors": 0,
+            "retries": 0,
+            "confusion_matrix": {t: {p: 0 for p in labels} for t in labels},
+            "predicted": None,
+            "true": None
+        }
+
+    def _validate_row(self, row: pd.Series) -> bool:
+        # if feedback_text exists and valid
+        feedback = row.get("feedback_text", "")
+        return feedback and not pd.isna(feedback)
+
+    def _build_prompt(self, row: pd.Series) -> str:
+        #Construct LLM prompt from row data
+        return f"Feedback: {row.get('feedback_text')}"
+
+    def _run_llm(self, llm: BaseModel, prompt: str, metrics: Dict[str, Any]) -> Tuple[str, int, int, float]:
+        #calls LLM with retry logic and track retries
+        text, in_toks, out_toks, latency = llm.infer_with_retry(prompt)
+        if latency > (self.app_config.retry_delay * 1000):
+            metrics["retries"] += 1
+
+        return text, in_toks, out_toks, latency
+
+    def _update_metrics(
+        self, 
+        metrics: Dict[str, Any], 
+        text: str, 
+        row: pd.Series, 
+        in_toks: int, 
+        out_toks: int, 
+        latency: float
+    ):
+        predicted = self.parser.parse(text)
+        true_sentiment = row.get("true_sentiment", "")
+        metrics["predicted"] = predicted
+        metrics["true"] = true_sentiment
+
+        metrics["total"] += 1
+        metrics["input_tokens"] += in_toks
+        metrics["output_tokens"] += out_toks
+        metrics["latencies"].append(latency)
+        if predicted == true_sentiment:
+            metrics["correct"] += 1
+
+        # Update confusion matrix
+        if true_sentiment in metrics["confusion_matrix"]:
+            if predicted in metrics["confusion_matrix"][true_sentiment]:
+                metrics["confusion_matrix"][true_sentiment][predicted] += 1
+
+    def _log_progress(self, metrics: Dict[str, Any], total_samples: int, latency: float):
+        """Log progress for current prediction."""
+        match_symbol = "✓" if metrics["predicted"] == metrics["true"] else "✗"
+        logger.info(
+            f"  [{metrics['total']}/{total_samples}] {match_symbol} "
+            f"Predicted: {metrics['predicted']}, True: {metrics['true']}, "
+            f"Latency: {latency:.0f}ms"
+        )
+
+    def _batch_sleep_logic(self, requests_in_batch: int, idx: int, total_samples: int) -> int:
+        #sleeps between batches and requests to avoid throttling
+        requests_in_batch += 1
+        if requests_in_batch >= self.app_config.batch_size:
+            logger.info(
+                f"Completed batch of {self.app_config.batch_size} requests. "
+                f"Taking {self.app_config.batch_break}s break..."
+            )
+            time.sleep(self.app_config.batch_break)
+            return 0
+        elif idx < total_samples - 1 and self.app_config.sleep_between_requests > 0:
+            time.sleep(self.app_config.sleep_between_requests)
+
+        return requests_in_batch
+
+    def _finalize_metrics(
+        self, 
+        metrics: Dict[str, Any], 
+        llm: BaseModel, 
+        model_id: str
+    ) -> Dict[str, Any]:
+        #Computes accuracy, cost, latency
+        if metrics["total"] == 0:
+            logger.warning(f"No predictions recorded for {model_id}")
+            return {
+                "model_name": model_id,
+                "accuracy": 0.0,
+                "average_latency_ms": 0.0,
+                "estimated_total_tokens": 0,
+                "estimated_cost_usd": 0.0,
+                "confusion_matrix": {},
+                "total_predictions": 0,
+                "errors": metrics["errors"],
+                "retries": metrics["retries"]
+            }
+
+        accuracy = (metrics["correct"] / metrics["total"] * 100)
+        avg_latency = sum(metrics["latencies"]) / len(metrics["latencies"]) if metrics["latencies"] else 0.0
+        total_tokens = metrics["input_tokens"] + metrics["output_tokens"]
+        cost = (
+            metrics["input_tokens"] * llm.config.pricing.get("input", 0.0) +
+            metrics["output_tokens"] * llm.config.pricing.get("output", 0.0)
+        ) / 1_000_000
+
+        logger.info(
+            f"Metrics for {model_id}: "
+            f"accuracy={accuracy:.2f}%, "
+            f"avg_latency={avg_latency:.2f}ms, "
+            f"cost=${cost:.6f}, "
+            f"errors={metrics['errors']}, "
+            f"retries={metrics['retries']}"
+        )
+
+        return {
+            "model_name": model_id,
+            "accuracy": round(accuracy, 2),
+            "average_latency_ms": round(avg_latency, 2),
+            "estimated_total_tokens": int(total_tokens),
+            "estimated_cost_usd": round(cost, 6),
+            "confusion_matrix": metrics["confusion_matrix"],
+            "total_predictions": metrics["total"],
+            "errors": metrics["errors"],
+            "retries": metrics["retries"]
+        }
+
+
 
 # This is the main class for the application this will tie everything together
 class BenchmarkApp:
