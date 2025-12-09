@@ -66,6 +66,10 @@ class AppConfig:
     sleep_between_requests: float = 0.5 
     max_tokens: int = 10
     temperature: float = 0.0
+    max_retries: int = 3  # Maximum retry attempts
+    retry_delay: float = 2.0  # Initial retry delay in seconds
+    batch_size: int = 10  # Requests before break
+    batch_break: float = 5.0  # Break duration after batch
 
 # UTILITY FUNCTIONS
 def load_csv(path: str) -> pd.DataFrame:
@@ -138,7 +142,7 @@ class ConfusionMatrix:
         return self.matrix
 
 class MetricsCollector:
-    """Collect and calculate benchmark metrics."""
+    #Collect and calculate benchmark metrics.
     
     def __init__(self, pricing: Dict[str, float]):
         self.pricing = pricing
@@ -149,6 +153,7 @@ class MetricsCollector:
         self.output_tokens = 0
         self.confusion_matrix = ConfusionMatrix()
         self.errors = 0
+        self.retries = 0  # Track retry attempts
         logger.debug("MetricsCollector initialized")
     
     def record_prediction(
@@ -159,7 +164,7 @@ class MetricsCollector:
         output_toks: int, 
         latency: float
     ):
-        """Record a single prediction."""
+        #Record a single prediction.
         self.input_tokens += input_toks
         self.output_tokens += output_toks
         self.latencies.append(latency)
@@ -172,11 +177,13 @@ class MetricsCollector:
             self.confusion_matrix.update(true_sentiment, predicted)
     
     def record_error(self):
-        """Record an error occurrence."""
         self.errors += 1
     
+    def record_retry(self):
+        #Record a retry attempt.
+        self.retries += 1
+    
     def calculate_metrics(self, model_name: str) -> Dict[str, Any]:
-        """Calculate final metrics."""
         if self.total == 0:
             logger.warning(f"No predictions recorded for {model_name}")
             return {
@@ -187,7 +194,8 @@ class MetricsCollector:
                 "estimated_cost_usd": 0.0,
                 "confusion_matrix": {},
                 "total_predictions": 0,
-                "errors": self.errors
+                "errors": self.errors,
+                "retries": self.retries
             }
         
         accuracy = (self.correct / self.total * 100)
@@ -203,7 +211,8 @@ class MetricsCollector:
             f"accuracy={accuracy:.2f}%, "
             f"avg_latency={avg_latency:.2f}ms, "
             f"cost=${cost:.6f}, "
-            f"errors={self.errors}"
+            f"errors={self.errors}, "
+            f"retries={self.retries}"
         )
         
         return {
@@ -214,7 +223,8 @@ class MetricsCollector:
             "estimated_cost_usd": round(cost, 6),
             "confusion_matrix": self.confusion_matrix.to_dict(),
             "total_predictions": self.total,
-            "errors": self.errors
+            "errors": self.errors,
+            "retries": self.retries
         }
 
 
@@ -226,7 +236,35 @@ class BaseModel:
         self.app_config = app_config
         logger.info(f"Initialized {config.provider} model: {config.model_name}")
 
+    def infer_with_retry(self, prompt: str) -> Tuple[str, int, int, float]:
+        last_exception = None
+        
+        for attempt in range(self.app_config.max_retries):
+            try:
+                # Attempt inference
+                return self.infer(prompt)
+                
+            except Exception as e:
+                last_exception = e
+                
+                if attempt < self.app_config.max_retries - 1:
+                    # Calculate delay with exponential backoff
+                    delay = self.app_config.retry_delay * (2 ** attempt)
+                    logger.warning(
+                        f"Inference failed (attempt {attempt + 1}/{self.app_config.max_retries}): {e}. "
+                        f"Retrying in {delay}s..."
+                    )
+                    time.sleep(delay)
+                else:
+                    logger.error(
+                        f"Inference failed after {self.app_config.max_retries} attempts: {e}"
+                    )
+        
+        # All retries exhausted
+        raise last_exception
+
     def infer(self, prompt: str) -> Tuple[str, int, int, float]:
+        """Subclasses must implement actual inference."""
         raise NotImplementedError("Subclasses must implement this method.")
     
 class OpenAIModel(BaseModel):    
@@ -327,9 +365,14 @@ class BenchmarkRunner:
     def run_benchmark(self, df: pd.DataFrame, llm: BaseModel) -> Dict[str, Any]:
         model_identifier = f"{llm.config.provider}:{llm.config.model_name}"
         logger.info(f"Starting benchmark for {model_identifier}")
+        logger.info(
+            f"Batch settings: {self.app_config.batch_size} requests per batch, "
+            f"{self.app_config.batch_break}s break between batches"
+        )
         
         metrics_collector = MetricsCollector(llm.config.pricing)
         total_samples = len(df)
+        requests_in_batch = 0
 
         for idx, row in df.iterrows():
             feedback_text = row.get('feedback_text', '')
@@ -341,9 +384,16 @@ class BenchmarkRunner:
             prompt = f"Feedback: {feedback_text}"
             
             try:
-                text, in_toks, out_toks, latency = llm.infer(prompt)
+                # Using retry logic
+                text, in_toks, out_toks, latency = llm.infer_with_retry(prompt)
+                
+                # Track if any retries occurred
+                if latency > (self.app_config.retry_delay * 1000):
+                    metrics_collector.record_retry()
+                
                 predicted = self.parser.parse(text)
                 true_sentiment = row.get("true_sentiment", "")
+                
                 metrics_collector.record_prediction(
                     predicted, 
                     true_sentiment, 
@@ -351,6 +401,7 @@ class BenchmarkRunner:
                     out_toks, 
                     latency
                 )
+                
                 is_correct = predicted == true_sentiment
                 match_symbol = "✓" if is_correct else "✗"
                 logger.info(
@@ -358,13 +409,25 @@ class BenchmarkRunner:
                     f"Predicted: {predicted}, True: {true_sentiment}, "
                     f"Latency: {latency:.0f}ms"
                 )
-
-                # Sleep between requests
-                if idx < total_samples - 1 and self.app_config.sleep_between_requests > 0:
+                
+                # Increment batch counter
+                requests_in_batch += 1
+                
+                # Check if batch is complete
+                if requests_in_batch >= self.app_config.batch_size:
+                    logger.info(
+                        f"Completed batch of {self.app_config.batch_size} requests. "
+                        f"Taking {self.app_config.batch_break}s break..."
+                    )
+                    time.sleep(self.app_config.batch_break)
+                    requests_in_batch = 0  # Reset counter
+                
+                # Regular sleep between requests (if not taking batch break)
+                elif idx < total_samples - 1 and self.app_config.sleep_between_requests > 0:
                     time.sleep(self.app_config.sleep_between_requests)
 
             except Exception as e:
-                logger.error(f"Error on sample {idx + 1}: {e}")
+                logger.error(f"Error on sample {idx + 1} after retries: {e}")
                 metrics_collector.record_error()
                 continue
         return metrics_collector.calculate_metrics(model_identifier)
@@ -377,12 +440,12 @@ class BenchmarkApp:
         logger.info("BenchmarkApp initialized")
 
     def register_model(self, model: BaseModel):
-        #Registering a model for benchmarking.
+        #Registering models for benchmarking
         self.models.append(model)
         logger.info(f"Registered model: {model.config.provider}:{model.config.model_name}")
 
     def run(self):
-        #Running benchmarks for all registered models.
+        #Running benchmark on registered models
         logger.info("Starting benchmark run")
         try:
             df = load_csv(self.app_config.csv_path)
@@ -424,7 +487,7 @@ class BenchmarkApp:
         self._print_summary(results)
 
     def _save_results(self, results: List[Dict[str, Any]]):
-        """Save benchmark results to JSON file."""
+        #Save results to JSON file
         try:
             logger.info(f"Saving results to {self.app_config.output_json}")
             with open(self.app_config.output_json, "w") as f:
@@ -435,7 +498,6 @@ class BenchmarkApp:
             raise
 
     def _print_summary(self, results: List[Dict[str, Any]]):
-        """Print benchmark summary."""
         logger.info("=" * 70)
         logger.info("BENCHMARK SUMMARY")
         logger.info("=" * 70)
@@ -447,9 +509,11 @@ class BenchmarkApp:
                 f"  Avg Latency:    {r['average_latency_ms']}ms\n"
                 f"  Total Tokens:   {r['estimated_total_tokens']}\n"
                 f"  Cost:           ${r['estimated_cost_usd']}\n"
-                f"  Errors:         {r['errors']}"
+                f"  Errors:         {r['errors']}\n"
+                f"  Retries:        {r['retries']}"
             )
             logger.info(summary)
+
 
 def build_app(app_config: AppConfig) -> BenchmarkApp:
     logger.info("Building application with configured models")
@@ -457,6 +521,7 @@ def build_app(app_config: AppConfig) -> BenchmarkApp:
     groq_key = os.getenv("GROQ_API_KEY")
     gemini_key = os.getenv("GEMINI_API_KEY")
     app = BenchmarkApp(app_config)
+    
     # OpenAI
     if openai_key:
         try:
@@ -490,12 +555,12 @@ def build_app(app_config: AppConfig) -> BenchmarkApp:
     #     try:
     #         logger.info("Initializing Gemini client")
     #         gemini_client = genai.Client(api_key=gemini_key)
-    #         config = ModelConfig(
+    #         gemini_config = ModelConfig(
     #             provider="Gemini",
     #             model_name="gemini-1.5-flash",
     #             pricing={"input": 0.0, "output": 0.0}
     #         )
-    #         app.register_model(GeminiModel(client, config, app_config))
+    #         app.register_model(GeminiModel(gemini_client, gemini_config, app_config))
     #     except Exception as e:
     #         logger.warning(f"Could not initialize Gemini: {e}")
 
@@ -521,10 +586,17 @@ def main():
             output_json=os.getenv("OUTPUT_JSON", "benchmark_results.json"),
             sleep_between_requests=float(os.getenv("SLEEP_BETWEEN_REQUESTS", "0.5")),
             max_tokens=int(os.getenv("MAX_TOKENS", "10")),
-            temperature=float(os.getenv("TEMPERATURE", "0.0"))
+            temperature=float(os.getenv("TEMPERATURE", "0.0")),
+            max_retries=int(os.getenv("MAX_RETRIES", "3")),
+            retry_delay=float(os.getenv("RETRY_DELAY", "2.0")),
+            batch_size=int(os.getenv("BATCH_SIZE", "10")),
+            batch_break=float(os.getenv("BATCH_BREAK", "5.0"))
         )
         
         logger.info(f"Configuration loaded: csv_path={app_config.csv_path}")
+        logger.info(f"Retry settings: max_retries={app_config.max_retries}, retry_delay={app_config.retry_delay}s")
+        logger.info(f"Batch settings: batch_size={app_config.batch_size}, batch_break={app_config.batch_break}s")
+        
         app = build_app(app_config)
         app.run()
         
