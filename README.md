@@ -32,7 +32,7 @@ This benchmarking system evaluates LLMs for sentiment classification of customer
 
 ---
 
-## ✨ Features
+## Features
 
 ### Core Functionality
 - Compare multiple LLM providers simultaneously
@@ -160,7 +160,7 @@ feedback_text,true_sentiment
 
 ## Usage
 
-### Basic Usage
+### Run the code
 
 ```bash
 python benchmark_llms.py
@@ -185,7 +185,7 @@ The script will:
 5. **Save Results**: Generate `benchmark_results.json`
 6. **Print Summary**: Display final metrics
 
-## 📤 Output Format
+## Output Format
 
 ### benchmark_results.json
 
@@ -269,95 +269,58 @@ Each class has one clear purpose:
 ### System Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                      BenchmarkApp                            │
-│  (Application Orchestrator)                                  │
-│  - Registers models                                          │
-│  - Coordinates execution                                     │
-└────────────────┬────────────────────────────────────────────┘
-                 │
+                      BenchmarkApp                            
+  (Application Orchestrator)                                  
+  - Registers models                                          
+  - Coordinates execution                                     
                  │ uses
                  ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    BenchmarkRunner                           │
-│  (Execution Coordinator)                                     │
-│  - Iterates through dataset                                  │
-│  - Handles batch processing                                  │
-│  - Manages retries                                           │
-└──────────┬──────────────────────────┬───────────────────────┘
-           │                          │
+                    BenchmarkRunner                           
+  - Iterates through dataset                                  
+  - Handles batch processing                                  
+  - Manages retries                                           
            │ uses                     │ uses
            ▼                          ▼
-┌──────────────────────┐   ┌──────────────────────────────────┐
-│  MetricsCollector    │   │      BaseModel (Abstract)         │
-│  - Tracks metrics    │   │  - Retry logic                    │
-│  - Calculates stats  │   │  - Error handling                 │
-│  - Confusion matrix  │   │  - Rate limiting                  │
-└──────────────────────┘   └──────┬───────────────────────────┘
-                                  │
+  MetricsCollector             BaseModel (Abstract)         
+  - Tracks metrics         - Retry logic                    
+  - Calculates stats       - Error handling                 
+  - Confusion matrix       - Rate limiting                  
                                   │ implements
                                   ▼
-                    ┌─────────────────────────────────────────┐
-                    │ OpenAIModel  GroqModel  GeminiModel    │
-                    │ - Provider-specific implementations     │
-                    └─────────────────────────────────────────┘
+                     OpenAIModel  GroqModel  GeminiModel    
+                     - Provider-specific implementations     
 ```
-
-### Error Handling Strategy
-
-**1. Retry Mechanism with Exponential Backoff**
-```python
-Attempt 1: Execute request
-  ↓ (fails)
-Wait 2 seconds → Retry
-  ↓ (fails)
-Wait 4 seconds → Retry
-  ↓ (fails)
-Wait 8 seconds → Retry
-  ↓ (fails)
-Log error, continue to next sample
-```
-
-**2. Batch Processing**
-```python
-Requests 1-10:  Process → Sleep 0.5s between each
-  ↓
-Break 5 seconds (batch complete)
-  ↓
-Requests 11-20: Process → Sleep 0.5s between each
-  ↓
-Break 5 seconds (batch complete)
-```
-
-**3. Graceful Degradation**
-- Single sample failure doesn't stop entire benchmark
-- Errors tracked in metrics for analysis
-- Detailed logs for debugging
 
 ### Key Design Decisions
 
-#### Why Separate MetricsCollector?
-- **Testability**: Can unit test metrics calculation independently
-- **Reusability**: Can use same collector with different runners
-- **Maintainability**: Metrics logic changes don't affect execution flow
+#### Why OpenAI 4.0 Mini and Groq LLaMA
+- OpenAI no longer offers a free tier; Gemini free tier is not available
+- GPT-4o Mini is faster than other free-tier LLMs and accuracy is close to full GPT-4
+- Groq LLaMA 3.1 8B Instant is very fast and available on free tier
 
-#### Why BaseModel Abstract Class?
-- **Extensibility**: Easy to add new providers (Claude, Mistral, etc.)
-- **Consistency**: All models have same interface
-- **Type Safety**: Clear contract for model implementations
+#### Why Retry Logic ?
+- Handles temporary API failures (timeouts, rate limits)
+- Automatically retries with exponential backoff
+- Ensures benchmark completes reliably even on free-tier APIs
 
 #### Why Batch Processing?
-- **Rate Limit Prevention**: Avoids hitting API rate limits
-- **Cost Control**: Built-in pauses reduce unexpected costs
-- **Reliability**: Gives APIs time to recover between batches
+-  Avoids hitting API rate limits
+- Built-in pauses reduce unexpected costs
+- Gives APIs time to recover between batches to reduce the throttling effect especially when using free tier
+
+#### Future Implementations
+
+- Prompt cache to reuse repeated inputs and reduce API calls
+- Confidence scoring to flag uncertain predictions for review
+- Parallel API requests for faster benchmarking
 
 ---
 
 ## Business Recommendations
 
-### Benchmark Results Summary
+### Results Summary
 
-Based on our benchmark with 25 customer feedback samples:
+Based on 25 customer feedback samples:
 
 | Metric | OpenAI (gpt-4o-mini) | Groq (llama-3.1-8b-instant) |
 |--------|---------------------|------------------------------|
@@ -365,7 +328,7 @@ Based on our benchmark with 25 customer feedback samples:
 | **Avg Latency** | 684.67ms | 230.47ms |
 | **Total Tokens** | 9,243 | 9,870 |
 | **Estimated Cost** | $0.001398 | $0.000495 |
-| **Cost per 1K samples** | $55.92 | $19.80 |
+| **Cost per 1K samples** | $0.05592 | $0.0198 |
 
 **Key Findings:**
 - OpenAI provides **4% higher accuracy** but at **2.97x slower** response time
@@ -376,22 +339,22 @@ Based on our benchmark with 25 customer feedback samples:
 
 ### Decision Framework
 
-Choosing the right model depends on multiple factors. Use this decision tree:
+Choosing the right model depends on multiple factors:
 
 ```
-START: What's your primary requirement?
+Can be based on primary requirement?
 │
-├─ ACCURACY is critical → Consider OpenAI
-│   ├─ False negatives costly? → OpenAI (96% accuracy)
-│   └─ Moderate accuracy OK? → Groq (92% still strong)
+├─ ACCURACY is critical -> Consider OpenAI
+│   ├─ False negatives costly? -> OpenAI (96% accuracy)
+│   └─ Moderate accuracy OK? -> Groq (92% still strong)
 │
-├─ SPEED is critical → Consider Groq
-│   ├─ Sub-second response needed? → Groq (230ms)
-│   └─ Can tolerate delay? → OpenAI (685ms acceptable)
+├─ SPEED is critical -> Consider Groq
+│   ├─ Sub-second response needed? -> Groq (230ms)
+│   └─ Can tolerate delay?-> OpenAI (685ms acceptable)
 │
-└─ COST is critical → Consider Groq
-    ├─ High volume (>100K/day)? → Groq (65% cost savings)
-    └─ Low volume (<10K/day)? → Either (cost difference minimal)
+└─ COST is critical -> Consider Groq
+    ├─ High volume (>100K/day)? -> Groq (65% cost savings)
+    └─ Low volume (<10K/day)? -> Either (cost difference minimal)
 ```
 
 ---
@@ -420,9 +383,9 @@ START: What's your primary requirement?
 - User experience requires <500ms response
 
 **Cost-Benefit Analysis (10,000 chats/day):**
-- Groq: $198/day = $5,940/month (230ms avg response)
-- OpenAI: $559/day = $16,770/month (685ms avg response)
-- **Savings: $10,830/month with Groq**
+- **Groq**: $0.20/day = **$5.94/month** (230ms avg response)
+- **OpenAI**: $0.56/day = **$16.78/month** (685ms avg response)
+- **Savings: $10.84/month with Groq (65% cheaper)**
 
 **Choose OpenAI if:**
 - Handling sensitive customer support
@@ -430,17 +393,17 @@ START: What's your primary requirement?
 - Budget allows for 2.82x higher cost
 - Can optimize other latency factors (caching, CDN)
 
-**Hybrid Approach (Best of Both Worlds):**
+**Hybrid Approach:**
 ```
 User Message
     ↓
 Fast Triage (Groq - 230ms)
-    ├─ High Confidence (>90%) → Use Groq Result
+    ├─ High Confidence (>90%) → Using Groq Result
     └─ Low Confidence (<90%) → Escalate to OpenAI
 ```
 - Groq handles 80% of clear cases fast
 - OpenAI handles ambiguous 20% accurately
-- **Cost: ~$300/day, Avg Latency: ~300ms**
+- **Cost: ~$8.10/month, Avg Latency: ~321ms**
 
 ---
 
@@ -461,42 +424,30 @@ Fast Triage (Groq - 230ms)
 
 **Volume Scenarios:**
 
-**Low Volume (<10,000 feedbacks/day):**
-- **OpenAI**: $56/day for 96% accuracy
-- **Groq**: $20/day for 92% accuracy
-- **Decision**: OpenAI - Cost difference is minimal ($36/day), accuracy gain is worth it
+**Low Volume (<=100K feedbacks/day):**
+- **OpenAI**: $168/month for 96% accuracy
+- **Groq**: $59.4/month for 92% accuracy
+- **Decision**: OpenAI - Cost difference minimal ($10.84/month), accuracy improvement justifies cost for business insights
 
-**Medium Volume (10K-100K/day):**
-- **OpenAI**: $560/day ($16,800/month)
-- **Groq**: $198/day ($5,940/month)
+**Medium Volume (1M/day):**
+- **OpenAI**: $1680/month
+- **Groq**: $600/month
 - **Decision**: Depends on budget and accuracy requirements
   - If budget allows → OpenAI for better insights
   - If cost-conscious → Groq, manually review edge cases
 
-**High Volume (>100K/day):**
-- **OpenAI**: $5,590/day ($167,700/month)
-- **Groq**: $1,980/day ($59,400/month)
-- **Decision**: Groq - Cost savings of $108,300/month justify slight accuracy drop
+**High Volume (>1M/day):**
+- **Decision**: Groq - Cost savings/month justify slight accuracy drop
 
 **Smart Batch Strategy:**
-```python
-# Process with Groq first (fast & cheap)
-batch_results = groq.process(all_feedback)
-
-# Filter low-confidence predictions
-uncertain = [r for r in batch_results if r.confidence < 0.8]
-
-# Re-process uncertain ones with OpenAI
-refined = openai.process(uncertain)
-
-# Combine results
-final_results = high_confidence + refined
-```
+- Process with Groq first (fast & cheap)
+- Filter low-confidence predictions
+- Re-process uncertain ones with OpenAI
+- Combine results
 
 **Benefits:**
-- 90% processed by Groq ($198)
-- 10% validated by OpenAI ($56)
-- **Total: ~$250/day vs $560 (55% savings)**
+- 90% processed by Groq
+- 10% validated by OpenAI
 - **Effective accuracy: ~95%**
 
 ---
@@ -576,24 +527,24 @@ final_results = high_confidence + refined
 ### Implementation Recommendations
 
 #### Phase 1: Start with Groq
-- Lower risk, lower cost
-- Establish baseline performance
-- Monitor accuracy in production
+- Use Groq first because it’s fast and cheap
+- Get a baseline of how well the model performs
+- Keep an eye on accuracy while it runs in production
 
 #### Phase 2: A/B Test OpenAI
-- Compare real-world accuracy
-- Measure business impact
-- Calculate ROI of accuracy gain
+- Try OpenAI on some cases to see real-world performance
+- Check the business impact of better accuracy
+- Figure out if the extra cost is worth it
 
 #### Phase 3: Optimize Hybrid
-- Route confident predictions to Groq
-- Escalate uncertain cases to OpenAI
-- Balance cost and accuracy
+- Let Groq handle predictions it’s confident about
+- Send tricky cases to OpenAI for higher accuracy
+- Find a balance between speed, cost, and accuracy
 
 #### Monitoring Metrics
-Track these KPIs to validate model choice:
-- **Accuracy Drift**: Are models maintaining performance?
-- **Cost per Prediction**: Is actual cost matching estimates?
+Keep track of these to make sure setup works well:
+- **Accuracy Drift**: Are predictions staying accurate over time?
+- **Cost per Prediction**: Are we spending what we expected?
 - **Latency P95**: Are users experiencing delays?
 - **False Negative Rate**: Are we missing critical issues?
 

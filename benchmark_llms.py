@@ -1,3 +1,7 @@
+'''
+    To benchmark multiple LLM providers (OpenAI, Groq, Gemini) on sentiment analysis of customer feedback.
+'''
+
 import json
 import os
 import time
@@ -12,7 +16,7 @@ import logging
 
 load_dotenv()
 
-# Configure logging
+# Configuring logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -71,7 +75,7 @@ class AppConfig:
     batch_size: int = 10  # Requests before break
     batch_break: float = 5.0  # Break duration after batch
 
-# UTILITY FUNCTIONS
+# utility functions
 def load_csv(path: str) -> pd.DataFrame:
     try:
         logger.info(f"Loading CSV file from: {path}")
@@ -180,7 +184,6 @@ class MetricsCollector:
         self.errors += 1
     
     def record_retry(self):
-        #Record a retry attempt.
         self.retries += 1
     
     def calculate_metrics(self, model_name: str) -> Dict[str, Any]:
@@ -227,7 +230,7 @@ class MetricsCollector:
             "retries": self.retries
         }
 
-
+# Base model class for LLMs with retry logic
 class BaseModel:
     def __init__(self, client: Any, config: ModelConfig, app_config: AppConfig):
         self.client = client
@@ -236,6 +239,7 @@ class BaseModel:
         self.app_config = app_config
         logger.info(f"Initialized {config.provider} model: {config.model_name}")
 
+    # To infer the llms with custom retry logic
     def infer_with_retry(self, prompt: str) -> Tuple[str, int, int, float]:
         last_exception = None
         
@@ -264,10 +268,12 @@ class BaseModel:
         raise last_exception
 
     def infer(self, prompt: str) -> Tuple[str, int, int, float]:
-        """Subclasses must implement actual inference."""
+        #Subclasses will implement actual inference
         raise NotImplementedError("Subclasses must implement this method.")
-    
+
+# OpenAI model class for inference
 class OpenAIModel(BaseModel):    
+    # To perform inference using OpenAI API
     def infer(self, prompt: str) -> Tuple[str, int, int, float]:
         logger.debug(f"Starting OpenAI inference")
         start = time.time()
@@ -292,7 +298,9 @@ class OpenAIModel(BaseModel):
             logger.error(f"OpenAI inference failed: {e}")
             raise
 
+# Groq model class for inference
 class GroqModel(BaseModel):    
+    # To infer from LLama using Groq API
     def infer(self, prompt: str) -> Tuple[str, int, int, float]:
         logger.debug(f"Starting Groq inference")
         start = time.time()
@@ -318,7 +326,7 @@ class GroqModel(BaseModel):
             logger.error(f"Groq inference failed: {e}")
             raise
 
-
+# Gemini model class for inference
 class GeminiModel(BaseModel):
     def infer(self, prompt: str) -> Tuple[str, int, int, float]:
         logger.debug(f"Starting Gemini inference")
@@ -356,6 +364,7 @@ class GeminiModel(BaseModel):
             logger.error(f"Gemini inference failed: {e}")
             raise
 
+# This class will run the benchmark process for given model
 class BenchmarkRunner:    
     def __init__(self, app_config: AppConfig, parser: SentimentParser = None):
         self.app_config = app_config
@@ -420,9 +429,9 @@ class BenchmarkRunner:
                         f"Taking {self.app_config.batch_break}s break..."
                     )
                     time.sleep(self.app_config.batch_break)
-                    requests_in_batch = 0  # Reset counter
+                    requests_in_batch = 0
                 
-                # Regular sleep between requests (if not taking batch break)
+                # Regular sleep between requests to avoid throttling (if not taking batch break)
                 elif idx < total_samples - 1 and self.app_config.sleep_between_requests > 0:
                     time.sleep(self.app_config.sleep_between_requests)
 
@@ -432,6 +441,7 @@ class BenchmarkRunner:
                 continue
         return metrics_collector.calculate_metrics(model_identifier)
 
+# This is the main class for the application this will tie everything together
 class BenchmarkApp:
     def __init__(self, app_config: AppConfig):
         self.app_config = app_config
@@ -515,6 +525,7 @@ class BenchmarkApp:
             logger.info(summary)
 
 
+# To build app with llm models and to configure the models
 def build_app(app_config: AppConfig) -> BenchmarkApp:
     logger.info("Building application with configured models")
     openai_key = os.getenv("OPENAI_API_KEY")
@@ -550,7 +561,7 @@ def build_app(app_config: AppConfig) -> BenchmarkApp:
         except Exception as e:
             logger.warning(f"Could not initialize Groq: {e}")
 
-    # Gemini (commented out by default)
+    # Gemini 
     # if gemini_key:
     #     try:
     #         logger.info("Initializing Gemini client")
@@ -607,7 +618,6 @@ def main():
     except Exception as e:
         logger.error(f"Benchmark failed: {e}", exc_info=True)
         raise
-
 
 if __name__ == "__main__":
     main()
