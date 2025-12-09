@@ -3,7 +3,7 @@
     {
       "model_name": "OpenAI:gpt-4o-mini",
       "accuracy": 96.0,
-      "average_latency_ms": 778.99,
+      "average_latency_ms": 684.67,
       "estimated_total_tokens": 9243,
       "estimated_cost_usd": 0.001398,
       "confusion_matrix": {
@@ -27,9 +27,9 @@
     {
       "model_name": "Groq:llama-3.1-8b-instant",
       "accuracy": 92.0,
-      "average_latency_ms": 323.51,
-      "estimated_total_tokens": 9878,
-      "estimated_cost_usd": 0.000496,
+      "average_latency_ms": 230.47,
+      "estimated_total_tokens": 9870,
+      "estimated_cost_usd": 0.000495,
       "confusion_matrix": {
         "Positive": {
           "Positive": 7,
