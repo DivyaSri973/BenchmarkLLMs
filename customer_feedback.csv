@@ -1,0 +1,36 @@
+feedback_text,true_sentiment,,,,,
+"The new dashboard is incredibly fast and intuitive. Great job,
+team!",Positive,,,,,
+"Your customer support was fantastic! Maria was so helpful and resolved my
+issue in minutes.",Positive,,,,,
+I absolutely love this product. It has saved me so much time.,Positive,,,,,
+"While the initial setup took a moment, the performance improvements are very
+noticeable. I'm happy with the update.",Positive,,,,,
+Five stars! Would recommend to anyone.,Positive,,,,,
+"The app crashed three times today while I was trying to save my work. I lost
+everything.",Negative,,,,,
+"I was charged twice for my subscription this month. This is
+unacceptable.",Negative,,,,,
+"The latest update removed a feature I used every day. Why would you do
+that?",Negative,,,,,
+The user interface is confusing and looks very outdated.,Negative,,,,,
+"I've been on hold for 45 minutes trying to reach support. Terrible
+service.",Negative,,,,,
+"Wow, the price went up again with no new features. Just great.",Negative,,,,,
+How do I change my payment information?,Neutral,,,,,
+I need a copy of my invoice for last month.,Neutral,,,,,
+Could you add a feature for exporting data to PDF?,Neutral,,,,,
+I need to reset my password but the link has expired.,Neutral,,,,,
+What are the system requirements for running the software?,Neutral,,,,,
+The trial period for my account ends in three days.,Neutral,,,,,
+"The response time is incredibly slow, making the tool almost unusable during
+peak hours.",Negative,,,,,
+"Thank you for the quick turnaround on my ticket, the issue is now
+resolved.",Positive,,,,,
+The documentation is clear and easy to follow.,Positive,,,,,
+"The button to confirm the purchase is not working on the mobile
+app.",Negative,,,,,
+I am trying to find out your business hours.,Neutral,,,,,
+"The product does what it says, but the design could be improved.",Negative,,,,,
+Where is the 'Settings' menu located?,Neutral,,,,,
+This is by far the best tool I have used for project management.,Positive,,,,,

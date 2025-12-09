@@ -1,0 +1,52 @@
+{
+  "models": [
+    {
+      "model_name": "gpt-4o-mini",
+      "accuracy": 96.0,
+      "average_latency_ms": 516.19,
+      "estimated_total_tokens": 9243,
+      "estimated_cost_usd": 0.001398,
+      "confusion_matrix": {
+        "Positive": {
+          "Positive": 8,
+          "Negative": 0,
+          "Neutral": 0
+        },
+        "Negative": {
+          "Positive": 0,
+          "Negative": 8,
+          "Neutral": 1
+        },
+        "Neutral": {
+          "Positive": 0,
+          "Negative": 0,
+          "Neutral": 8
+        }
+      }
+    },
+    {
+      "model_name": "llama-3.1-8b-instant",
+      "accuracy": 92.0,
+      "average_latency_ms": 1118.95,
+      "estimated_total_tokens": 9870,
+      "estimated_cost_usd": 0.000495,
+      "confusion_matrix": {
+        "Positive": {
+          "Positive": 7,
+          "Negative": 0,
+          "Neutral": 1
+        },
+        "Negative": {
+          "Positive": 0,
+          "Negative": 8,
+          "Neutral": 1
+        },
+        "Neutral": {
+          "Positive": 0,
+          "Negative": 0,
+          "Neutral": 8
+        }
+      }
+    }
+  ]
+}

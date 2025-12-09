@@ -1,0 +1,52 @@
+{
+  "models": [
+    {
+      "model_name": "OpenAI:gpt-4o-mini",
+      "accuracy": 96.0,
+      "average_latency_ms": 778.99,
+      "estimated_total_tokens": 9243,
+      "estimated_cost_usd": 0.001398,
+      "confusion_matrix": {
+        "Positive": {
+          "Positive": 8,
+          "Negative": 0,
+          "Neutral": 0
+        },
+        "Negative": {
+          "Positive": 0,
+          "Negative": 8,
+          "Neutral": 1
+        },
+        "Neutral": {
+          "Positive": 0,
+          "Negative": 0,
+          "Neutral": 8
+        }
+      }
+    },
+    {
+      "model_name": "Groq:llama-3.1-8b-instant",
+      "accuracy": 92.0,
+      "average_latency_ms": 323.51,
+      "estimated_total_tokens": 9878,
+      "estimated_cost_usd": 0.000496,
+      "confusion_matrix": {
+        "Positive": {
+          "Positive": 7,
+          "Negative": 0,
+          "Neutral": 1
+        },
+        "Negative": {
+          "Positive": 0,
+          "Negative": 8,
+          "Neutral": 1
+        },
+        "Neutral": {
+          "Positive": 0,
+          "Negative": 0,
+          "Neutral": 8
+        }
+      }
+    }
+  ]
+}
